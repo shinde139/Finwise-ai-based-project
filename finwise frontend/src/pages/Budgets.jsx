@@ -1,0 +1,652 @@
+import React, { useState, useEffect } from "react";
+import Sidebar from "../components/Sidebar";
+import aiAPI from "../api/aiApi";
+import {
+  FaWallet,
+  FaTriangleExclamation,
+  FaChartSimple,
+  FaLightbulb,
+  FaCoins,
+  FaUtensils,
+  FaPlane,
+  FaBagShopping,
+} from "react-icons/fa6";
+
+function Budgets() {
+  const [budgets, setBudgets] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [editingBudget, setEditingBudget] = useState(null);
+  const [formData, setFormData] = useState({
+    budgetAmount: "",
+    spentAmount: "",
+    startDate: "",
+    endDate: "",
+    categoryId: "",
+  });
+  
+  // Get user ID from localStorage or context
+  const userId = JSON.parse(localStorage.getItem("user"))?.userId || 1;
+
+  // Fetch budgets and categories on component mount
+  useEffect(() => {
+    fetchBudgets();
+    fetchCategories();
+  }, []);
+
+  // Helper function to extract error message
+  const getErrorMessage = (err) => {
+    if (err.response?.data?.message) {
+      return err.response.data.message;
+    }
+    if (err.response?.data?.error) {
+      return err.response.data.error;
+    }
+    if (typeof err.response?.data === 'string') {
+      return err.response.data;
+    }
+    if (err.message) {
+      return err.message;
+    }
+    return "An unexpected error occurred";
+  };
+
+  // Fetch all budgets for the user - UPDATED to handle new DTO format
+  const fetchBudgets = async () => {
+    try {
+      setLoading(true);
+      const response = await aiAPI.get(`/api/budget/${userId}`);
+      console.log("Budgets fetched:", response.data);
+      
+      // The response now has categoryName directly
+      if (response.data && response.data.length > 0) {
+        response.data.forEach((budget, index) => {
+          console.log(`Budget ${index + 1}:`, {
+            id: budget.budgetId,
+            categoryName: budget.categoryName,  // Now directly available
+            categoryId: budget.categoryId,
+            amount: budget.budgetAmount,
+            spent: budget.spentAmount,
+            remaining: budget.remainingAmount
+          });
+        });
+      }
+      
+      setBudgets(response.data);
+      setError(null);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch all categories for the user
+  const fetchCategories = async () => {
+    try {
+      const response = await aiAPI.get(`/api/categories/user/${userId}`);
+      setCategories(response.data);
+    } catch (err) {
+      console.error("Error fetching categories:", err);
+    }
+  };
+
+  // Add new budget
+  const handleAddBudget = async (e) => {
+    e.preventDefault();
+    try {
+      const budgetData = {
+        budgetAmount: parseFloat(formData.budgetAmount),
+        spentAmount: parseFloat(formData.spentAmount) || 0,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
+      };
+
+      await aiAPI.post(`/api/budget/${userId}/${formData.categoryId}`, budgetData);
+      
+      setFormData({
+        budgetAmount: "",
+        spentAmount: "",
+        startDate: "",
+        endDate: "",
+        categoryId: "",
+      });
+      setShowModal(false);
+      await fetchBudgets();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  };
+
+  // Update existing budget (PUT) - UPDATED to handle new format
+  const handleUpdateBudget = async (e) => {
+    e.preventDefault();
+    try {
+      const budgetData = {
+        budgetAmount: parseFloat(formData.budgetAmount),
+        spentAmount: parseFloat(formData.spentAmount) || 0,
+        startDate: formData.startDate,
+        endDate: formData.endDate,
+        category: { categoryId: parseInt(formData.categoryId) },
+      };
+
+      await aiAPI.put(`/api/budget/${editingBudget.budgetId}`, budgetData);
+      
+      setFormData({
+        budgetAmount: "",
+        spentAmount: "",
+        startDate: "",
+        endDate: "",
+        categoryId: "",
+      });
+      setEditingBudget(null);
+      setShowModal(false);
+      await fetchBudgets();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  };
+
+  // Delete budget
+  const handleDeleteBudget = async (budgetId) => {
+    if (!window.confirm("Are you sure you want to delete this budget?")) {
+      return;
+    }
+
+    try {
+      await aiAPI.delete(`/api/budget/${budgetId}`);
+      await fetchBudgets();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
+  };
+
+  // Open modal for adding new budget
+  const openAddModal = () => {
+    setEditingBudget(null);
+    setFormData({
+      budgetAmount: "",
+      spentAmount: "",
+      startDate: "",
+      endDate: "",
+      categoryId: "",
+    });
+    setShowModal(true);
+  };
+
+  // Open modal for editing budget - UPDATED to use categoryId directly
+  const openEditModal = (budget) => {
+    setEditingBudget(budget);
+    setFormData({
+      budgetAmount: budget.budgetAmount?.toString() || "",
+      spentAmount: budget.spentAmount?.toString() || "",
+      startDate: budget.startDate || "",
+      endDate: budget.endDate || "",
+      categoryId: budget.categoryId?.toString() || "",  // Now directly available
+    });
+    setShowModal(true);
+  };
+
+  // Calculate totals
+  const totalBudget = budgets.reduce((sum, b) => sum + (b.budgetAmount || 0), 0);
+  const totalSpent = budgets.reduce((sum, b) => sum + (b.spentAmount || 0), 0);
+  const totalRemaining = totalBudget - totalSpent;
+  const efficiency = totalBudget > 0 ? Math.round((totalSpent / totalBudget) * 100) : 0;
+
+  // Get category icon based on category name - UPDATED to use categoryName directly
+  const getCategoryIcon = (categoryName) => {
+    const name = categoryName?.toLowerCase() || "";
+    if (name.includes("food") || name.includes("dining") || name.includes("restaurant") || name.includes("eat") || name.includes("grocer")) {
+      return <FaUtensils className="text-xl sm:text-2xl lg:text-3xl text-green-400" />;
+    } else if (name.includes("travel") || name.includes("transport") || name.includes("flight") || name.includes("trip") || name.includes("fuel")) {
+      return <FaPlane className="text-xl sm:text-2xl lg:text-3xl text-cyan-400" />;
+    } else if (name.includes("shop") || name.includes("retail") || name.includes("clothing") || name.includes("shopping") || name.includes("buy")) {
+      return <FaBagShopping className="text-xl sm:text-2xl lg:text-3xl text-pink-400" />;
+    } else {
+      return <FaWallet className="text-xl sm:text-2xl lg:text-3xl text-purple-400" />;
+    }
+  };
+
+  // Get category color for progress bar - UPDATED to use categoryName directly
+  const getCategoryColor = (categoryName) => {
+    const name = categoryName?.toLowerCase() || "";
+    if (name.includes("food") || name.includes("dining") || name.includes("restaurant") || name.includes("eat") || name.includes("grocer")) {
+      return "bg-green-500";
+    } else if (name.includes("travel") || name.includes("transport") || name.includes("flight") || name.includes("trip") || name.includes("fuel")) {
+      return "bg-cyan-500";
+    } else if (name.includes("shop") || name.includes("retail") || name.includes("clothing") || name.includes("shopping") || name.includes("buy")) {
+      return "bg-pink-500";
+    } else {
+      return "bg-purple-500";
+    }
+  };
+
+  return (
+    <div className="flex bg-[#070B28] text-white min-h-screen overflow-x-hidden">
+      <Sidebar />
+
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+        {/* TOP */}
+
+        <div className="flex flex-col lg:flex-row justify-between lg:items-center gap-6 mb-10">
+          <div>
+            <h1 className="text-3xl sm:text-4xl lg:text-6xl font-bold">
+              Budget Workspace
+            </h1>
+
+            <p className="text-gray-400 mt-2 text-sm sm:text-base lg:text-lg">
+              Smart control over monthly spending
+            </p>
+          </div>
+
+          <button
+            onClick={openAddModal}
+            className="
+            w-full
+            lg:w-auto
+            bg-gradient-to-r
+            from-cyan-500
+            to-blue-600
+            px-6
+            lg:px-8
+            py-3
+            lg:py-4
+            rounded-2xl
+            text-base
+            lg:text-lg
+            font-bold
+            shadow-2xl
+            hover:scale-105
+            transition
+            duration-300
+            "
+          >
+            + New Budget
+          </button>
+        </div>
+
+        {/* MAIN GRID */}
+
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+          {/* LEFT PANEL */}
+
+          <div className="xl:col-span-3 space-y-6">
+            {/* TOTAL BUDGET */}
+
+            <div className="bg-[#11183C] p-5 sm:p-6 lg:p-7 rounded-[25px] lg:rounded-[35px] border border-[#26316A]">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-gray-400 text-sm sm:text-base">
+                    Total Budget
+                  </p>
+
+                  <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold mt-4 text-cyan-400">
+                    ₹{totalBudget.toLocaleString()}
+                  </h1>
+                </div>
+
+                <div
+                  className="
+                  w-14 h-14
+                  sm:w-16 sm:h-16
+                  lg:w-20 lg:h-20
+                  rounded-3xl
+                  bg-gradient-to-r
+                  from-cyan-500
+                  to-blue-600
+                  flex
+                  items-center
+                  justify-center
+                  text-2xl
+                  lg:text-3xl
+                  "
+                >
+                  <FaWallet />
+                </div>
+              </div>
+            </div>
+
+            {/* ALERT */}
+
+            {budgets.some(b => b.budgetAmount > 0 && (b.spentAmount / b.budgetAmount) > 0.75) && (
+              <div className="bg-gradient-to-r from-red-500 to-pink-600 p-5 sm:p-6 lg:p-7 rounded-[25px] lg:rounded-[35px]">
+                <div className="flex items-center gap-4">
+                  <FaTriangleExclamation className="text-2xl lg:text-4xl" />
+
+                  <h1 className="text-2xl lg:text-3xl font-bold">
+                    Alert
+                  </h1>
+                </div>
+
+                <p className="mt-4 lg:mt-6 text-base lg:text-lg leading-7">
+                  Some expenses exceeded 75% of allocated limits. Review your spending!
+                </p>
+              </div>
+            )}
+
+            {/* AI PLANNER */}
+
+            <div className="bg-[#11183C] p-5 sm:p-6 lg:p-7 rounded-[25px] lg:rounded-[35px] border border-[#26316A]">
+              <div className="flex items-center gap-4">
+                <FaLightbulb className="text-2xl lg:text-4xl text-yellow-400" />
+
+                <h1 className="text-2xl lg:text-3xl font-bold">
+                  AI Planner
+                </h1>
+              </div>
+
+              <p className="text-gray-400 mt-4 lg:mt-6 leading-7 text-base lg:text-lg">
+                {budgets.length > 0 
+                  ? "Review your category spending to optimize your budget allocation."
+                  : "Start by creating a budget to get AI-powered insights."}
+              </p>
+            </div>
+          </div>
+
+          {/* CENTER PANEL */}
+
+          <div className="xl:col-span-6 bg-[#11183C] rounded-[25px] lg:rounded-[35px] p-5 sm:p-6 lg:p-8 border border-[#26316A]">
+            <div className="flex justify-between items-center mb-8 lg:mb-10">
+              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold">
+                Expense Allocation
+              </h1>
+
+              <FaChartSimple className="text-2xl sm:text-3xl lg:text-4xl text-cyan-400" />
+            </div>
+
+            {loading ? (
+              <div className="text-center text-gray-400 py-8">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-cyan-500 mx-auto mb-4"></div>
+                <p>Loading budgets...</p>
+              </div>
+            ) : error ? (
+              <div className="text-center text-red-400 py-8">
+                <p>Error: {error}</p>
+                <button 
+                  onClick={fetchBudgets}
+                  className="mt-4 px-4 py-2 bg-cyan-500 rounded-xl hover:bg-cyan-600 transition"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : budgets.length === 0 ? (
+              <div className="text-center text-gray-400 py-8">
+                <p className="text-xl mb-4">No budgets found</p>
+                <p className="text-sm">Click "+ New Budget" to create your first budget</p>
+              </div>
+            ) : (
+              budgets.map((budget) => {
+                const percentage = budget.budgetAmount > 0 
+                  ? Math.round((budget.spentAmount / budget.budgetAmount) * 100)
+                  : 0;
+                // UPDATED: Get categoryName directly from the budget object
+                const categoryName = budget.categoryName || "Uncategorized";
+                const colorClass = getCategoryColor(categoryName);
+
+                return (
+                  <div key={budget.budgetId} className="mb-8 lg:mb-10">
+                    <div className="flex justify-between items-center mb-4">
+                      <div 
+                        className="flex items-center gap-3 sm:gap-4 cursor-pointer hover:opacity-80 transition"
+                        onClick={() => openEditModal(budget)}
+                      >
+                        {getCategoryIcon(categoryName)}
+
+                        <h2 className="text-lg sm:text-xl lg:text-2xl font-bold">
+                          {categoryName}
+                        </h2>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        <span className="text-sm sm:text-base lg:text-lg text-gray-400">
+                          ₹{budget.spentAmount?.toLocaleString() || 0} / ₹{budget.budgetAmount?.toLocaleString() || 0}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteBudget(budget.budgetId)}
+                          className="text-red-400 hover:text-red-300 transition text-sm hover:scale-110"
+                          title="Delete Budget"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="w-full h-4 sm:h-5 bg-[#1B2559] rounded-full">
+                      <div 
+                        className={`${colorClass} h-4 sm:h-5 rounded-full transition-all duration-500`} 
+                        style={{ width: `${Math.min(percentage, 100)}%` }}
+                      />
+                    </div>
+                    
+                    {/* Show remaining amount */}
+                    {budget.remainingAmount !== undefined && (
+                      <div className="flex justify-end mt-1">
+                        <span className="text-xs text-gray-400">
+                          Remaining: ₹{budget.remainingAmount.toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+
+            {/* STATS */}
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mt-10 lg:mt-14">
+              <div className="bg-[#0D1335] p-5 rounded-3xl">
+                <p className="text-gray-400">Used</p>
+
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-4">
+                  ₹{totalSpent.toLocaleString()}
+                </h1>
+              </div>
+
+              <div className="bg-[#0D1335] p-5 rounded-3xl">
+                <p className="text-gray-400">Remaining</p>
+
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-4">
+                  ₹{totalRemaining.toLocaleString()}
+                </h1>
+              </div>
+
+              <div className="bg-[#0D1335] p-5 rounded-3xl">
+                <p className="text-gray-400">Efficiency</p>
+
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold mt-4">
+                  {efficiency}%
+                </h1>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT PANEL */}
+
+          <div className="xl:col-span-3 space-y-6">
+            {/* SAVINGS */}
+
+            <div className="bg-gradient-to-b from-green-500 to-emerald-700 p-6 lg:p-8 rounded-[25px] lg:rounded-[35px]">
+              <FaCoins className="text-4xl lg:text-5xl" />
+
+              <h1 className="text-3xl lg:text-4xl font-bold mt-6 lg:mt-8">
+                Savings
+              </h1>
+
+              <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold mt-4 lg:mt-6">
+                ₹{totalRemaining.toLocaleString()}
+              </h2>
+
+              <p className="mt-4 lg:mt-6 text-base lg:text-lg">
+                {totalRemaining > 0 
+                  ? "Great job staying within your budget!"
+                  : "You've exceeded your budget. Review your spending."}
+              </p>
+            </div>
+
+            {/* BUDGET SCORE */}
+
+            <div className="bg-[#11183C] p-6 lg:p-8 rounded-[25px] lg:rounded-[35px] border border-[#26316A]">
+              <h1 className="text-2xl lg:text-3xl font-bold mb-8">
+                Budget Score
+              </h1>
+
+              <div className="flex justify-center">
+                <div
+                  className="
+                  w-32 h-32
+                  sm:w-40 sm:h-40
+                  lg:w-44 lg:h-44
+                  rounded-full
+                  border-[12px]
+                  lg:border-[16px]
+                  border-cyan-500
+                  flex
+                  items-center
+                  justify-center
+                  "
+                >
+                  <div className="text-center">
+                    <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold">
+                      {budgets.length > 0 ? 100 - efficiency : 0}%
+                    </h1>
+
+                    <p className="text-gray-400 mt-2 text-sm sm:text-base">
+                      {budgets.length === 0 ? "No Budget" : "Smart Usage"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Modal for Add/Edit Budget */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#11183C] rounded-[35px] p-6 lg:p-8 max-w-md w-full border border-[#26316A] max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl lg:text-3xl font-bold mb-6">
+              {editingBudget ? "Edit Budget" : "Create New Budget"}
+            </h2>
+
+            <form onSubmit={editingBudget ? handleUpdateBudget : handleAddBudget}>
+              <div className="space-y-4">
+                {/* Category Selection */}
+                <div>
+                  <label className="block text-gray-400 text-sm mb-2">
+                    Category *
+                  </label>
+                  <select
+                    required
+                    value={formData.categoryId}
+                    onChange={(e) => setFormData({...formData, categoryId: e.target.value})}
+                    className="w-full bg-[#0D1335] border border-[#26316A] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="">Select Category</option>
+                    {categories.map((category) => (
+                      <option key={category.categoryId} value={category.categoryId}>
+                        {category.categoryName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Budget Amount */}
+                <div>
+                  <label className="block text-gray-400 text-sm mb-2">
+                    Budget Amount (₹) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={formData.budgetAmount}
+                    onChange={(e) => setFormData({...formData, budgetAmount: e.target.value})}
+                    className="w-full bg-[#0D1335] border border-[#26316A] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                    placeholder="Enter budget amount"
+                  />
+                </div>
+
+                {/* Spent Amount */}
+                <div>
+                  <label className="block text-gray-400 text-sm mb-2">
+                    Spent Amount (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.spentAmount}
+                    onChange={(e) => setFormData({...formData, spentAmount: e.target.value})}
+                    className="w-full bg-[#0D1335] border border-[#26316A] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                    placeholder="Enter spent amount"
+                  />
+                </div>
+
+                {/* Start Date */}
+                <div>
+                  <label className="block text-gray-400 text-sm mb-2">
+                    Start Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.startDate}
+                    onChange={(e) => setFormData({...formData, startDate: e.target.value})}
+                    className="w-full bg-[#0D1335] border border-[#26316A] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                {/* End Date */}
+                <div>
+                  <label className="block text-gray-400 text-sm mb-2">
+                    End Date *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.endDate}
+                    onChange={(e) => setFormData({...formData, endDate: e.target.value})}
+                    className="w-full bg-[#0D1335] border border-[#26316A] rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 mt-8">
+                <button
+                  type="submit"
+                  className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-3 rounded-xl font-bold hover:scale-105 transition duration-300"
+                >
+                  {editingBudget ? "Update" : "Create"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false);
+                    setEditingBudget(null);
+                    setFormData({
+                      budgetAmount: "",
+                      spentAmount: "",
+                      startDate: "",
+                      endDate: "",
+                      categoryId: "",
+                    });
+                  }}
+                  className="flex-1 bg-[#1B2559] px-6 py-3 rounded-xl font-bold hover:bg-[#26316A] transition duration-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Budgets;
